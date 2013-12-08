@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, DeriveDataTypeable, NamedFieldPuns, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings, DeriveDataTypeable, NamedFieldPuns, FlexibleInstances, FlexibleContexts, DeriveGeneric #-}
 
 module Twilio where
 
@@ -11,6 +11,7 @@ import qualified Data.Text as T
 import Network (withSocketsDo)
 import Network.HTTP.Conduit
 import Data.Aeson
+import Data.Data
 import Data.String
 import qualified Data.ByteString.Lazy as L
 import Control.Monad.IO.Class
@@ -25,26 +26,27 @@ import Data.Maybe
 import Control.Failure
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.IO.Class
 
 data User = User { sid :: ByteString
                  , authToken :: ByteString
-                 }
+                 } deriving (Show, Eq, Data, Typeable)
 
 data SMS = SMS { from :: ByteString
                , to :: ByteString
                , body :: ByteString
-               } deriving (Show)
+               } deriving (Show, Eq, Data, Typeable)
 
 data SentSMS = SentSMS { smsId :: ByteString
                        , sms :: SMS
                        , smsStatus :: SMSStatus
-                       } deriving (Show)
+                       } deriving (Show, Eq, Data, Typeable)
 
 data SMSStatus = Queued
                | Sending
                | Failed
                | Sent UTCTime
-               deriving (Show)
+               deriving (Show, Eq, Data, Typeable)
 
 twilioUTCFormat :: String
 twilioUTCFormat = "%a, %d %b %Y %T %z"
@@ -99,12 +101,12 @@ twilioReq user method path = do
     let req = initReq { method = (fromString $ show method), secure = True, responseTimeout = Just 10000000 }
     return $ applyBasicAuth (sid user) (authToken user) req
 
-sendMessage :: User -> SMS -> MaybeT IO SentSMS
-sendMessage user sms = MaybeT $ withSocketsDo $ do
+sendMessage :: MonadIO m => User -> SMS -> MaybeT m SentSMS
+sendMessage user sms = MaybeT $ liftIO $ withSocketsDo $ do
     req <- urlEncodedBody [("From", from sms), ("To", to sms), ("Body", body sms)] <$> twilioReq user POST ("/Messages.json" :: String)
     withManager $ \m -> (decode . responseBody) <$> httpLbs req m
 
-queryMessage :: User -> ByteString -> MaybeT IO SentSMS
-queryMessage user messageSid = MaybeT $ withSocketsDo $ do
+queryMessage :: MonadIO m => User -> ByteString -> MaybeT m SentSMS
+queryMessage user messageSid = MaybeT $ liftIO $ withSocketsDo $ do
     req <- twilioReq user GET ("/Messages/" <> messageSid <> ".json")
     withManager $ \m -> (decode . responseBody) <$> httpLbs req m
