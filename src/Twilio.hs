@@ -32,9 +32,9 @@ data User = User { sid :: ByteString
                  , authToken :: ByteString
                  } deriving (Show, Eq, Data, Typeable)
 
-data SMS = SMS { from :: ByteString
-               , to :: ByteString
-               , body :: ByteString
+data SMS = SMS { smsFrom :: ByteString
+               , smsTo :: ByteString
+               , smsBody :: ByteString
                } deriving (Show, Eq, Data, Typeable)
 
 data SentSMS = SentSMS { smsId :: ByteString
@@ -47,6 +47,19 @@ data SMSStatus = Queued
                | Failed
                | Sent UTCTime
                deriving (Show, Eq, Data, Typeable)
+
+data Call = Call { callFrom :: ByteString
+                 , callTo :: ByteString
+                 , callHandler :: CallHandler
+                 } deriving (Show, Eq, Data, Typeable)
+
+-- | What is going to handle the call?
+data CallHandler = UrlHandler ByteString  -- ^ Specity a specific URL to quiery for TwilML
+                 | ApplicationHandler ByteString  -- ^ Specify a registered application SID.
+                 deriving (Show, Eq, Data, Typeable)
+
+data CallRecord = CallRecord { callId :: ByteString
+                             } deriving (Show, Eq, Data, Typeable)
 
 twilioUTCFormat :: String
 twilioUTCFormat = "%a, %d %b %Y %T %z"
@@ -73,11 +86,11 @@ instance FromJSON SMSStatus where
                 return $ Sent sentTime
     parseJSON _ = mzero
 
-testSMS :: SMS
-testSMS = SMS { from = "+441233801290"
-              , to = "+447724766810"
-              , body = "Test Haskell"
-              }
+instance FromJSON CallRecord where
+    parseJSON (Object v) = do
+        sid <- v .: "sid"
+        return $ CallRecord sid
+    parseJSON _ = mzero
 
 urlBase :: String
 urlBase = "https://api.twilio.com/2010-04-01/Accounts/"
@@ -95,6 +108,19 @@ instance ToString [Char] where
 instance ToString ByteString where
     toString = unsafeCoerce . unpack
 
+class ToParamList a where
+    toParamList :: a -> [(ByteString, ByteString)]
+
+instance ToParamList SMS where
+    toParamList sms = [("From", smsFrom sms), ("To", smsTo sms), ("Body", smsBody sms)]
+
+instance ToParamList Call where
+    toParamList call = [("From", callFrom call), ("To", callTo call)] ++ toParamList (callHandler call)
+
+instance ToParamList CallHandler where
+    toParamList (UrlHandler url) = [("Url", url)]
+    toParamList (ApplicationHandler appSid) = [("ApplicationSid", appSid)]
+
 twilioReq :: (ToString a, Failure HttpException m) => User -> Method -> a -> m (Request m1)
 twilioReq user method path = do
     initReq <- parseUrl $ urlBase <> toString (sid user) <> toString path
@@ -103,10 +129,15 @@ twilioReq user method path = do
 
 sendMessage :: MonadIO m => User -> SMS -> MaybeT m SentSMS
 sendMessage user sms = MaybeT $ liftIO $ withSocketsDo $ do
-    req <- urlEncodedBody [("From", from sms), ("To", to sms), ("Body", body sms)] <$> twilioReq user POST ("/Messages.json" :: String)
+    req <- urlEncodedBody (toParamList sms) <$> twilioReq user POST ("/Messages.json" :: String)
     withManager $ \m -> (decode . responseBody) <$> httpLbs req m
 
 queryMessage :: MonadIO m => User -> ByteString -> MaybeT m SentSMS
 queryMessage user messageSid = MaybeT $ liftIO $ withSocketsDo $ do
     req <- twilioReq user GET ("/Messages/" <> messageSid <> ".json")
+    withManager $ \m -> (decode . responseBody) <$> httpLbs req m
+
+makeCall :: MonadIO m => User -> Call -> MaybeT m CallRecord
+makeCall user call = MaybeT $ liftIO $ withSocketsDo $ do
+    req <- urlEncodedBody (toParamList call) <$> twilioReq user POST ("/Calls.json" :: String)
     withManager $ \m -> (decode . responseBody) <$> httpLbs req m
