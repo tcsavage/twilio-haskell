@@ -6,6 +6,8 @@
   , FlexibleContexts
   , DeriveGeneric #-}
 
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+    
 module Twilio where
 
 import Data.ByteString (ByteString, unpack)
@@ -86,6 +88,7 @@ instance FromJSON SMSStatus where
             "sent" -> do
                 sentTime <- fromJust . parseTime defaultTimeLocale twilioUTCFormat . T.unpack <$> v .: "date_sent"
                 return $ Sent sentTime
+            _ -> mzero
     parseJSON _ = mzero
 
 
