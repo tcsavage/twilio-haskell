@@ -1,32 +1,36 @@
-{-# LANGUAGE OverloadedStrings, DeriveDataTypeable, NamedFieldPuns, FlexibleInstances, FlexibleContexts, DeriveGeneric #-}
+{-# LANGUAGE 
+    OverloadedStrings
+  , DeriveDataTypeable
+  , NamedFieldPuns
+  , FlexibleInstances
+  , FlexibleContexts
+  , DeriveGeneric #-}
 
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+    
 module Twilio where
 
 import Data.ByteString (ByteString, unpack)
-import qualified Data.ByteString.Base64 as B64
-import qualified Data.ByteString.Base64.Lazy as L64
 import Data.Monoid
 import qualified Data.Text as T
 
 import Network (withSocketsDo)
 import Network.HTTP.Conduit
 import Data.Aeson
+import Data.Aeson.Types (Parser)
 import Data.Data
 import Data.String
-import qualified Data.ByteString.Lazy as L
+import qualified Data.Text.Encoding as TE
+
 import Control.Monad.IO.Class
+import Control.Monad.Catch (MonadThrow)
 import Control.Applicative
 import Control.Monad
 import Unsafe.Coerce
-import Data.Aeson
-import Data.Aeson.Types
 import Data.Time
 import System.Locale
 import Data.Maybe
-import Control.Failure
 import Control.Monad.Trans.Maybe
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.IO.Class
 
 data User = User { sid :: ByteString
                  , authToken :: ByteString
@@ -63,7 +67,7 @@ data CallRecord = CallRecord { callId :: ByteString
 
 twilioUTCFormat :: String
 twilioUTCFormat = "%a, %d %b %Y %T %z"
-
+                
 instance FromJSON SentSMS where
     parseJSON (Object v) = do
         sid <- v .: "sid"
@@ -84,7 +88,9 @@ instance FromJSON SMSStatus where
             "sent" -> do
                 sentTime <- fromJust . parseTime defaultTimeLocale twilioUTCFormat . T.unpack <$> v .: "date_sent"
                 return $ Sent sentTime
+            _ -> mzero
     parseJSON _ = mzero
+
 
 instance FromJSON CallRecord where
     parseJSON (Object v) = do
@@ -107,6 +113,9 @@ instance ToString [Char] where
 
 instance ToString ByteString where
     toString = unsafeCoerce . unpack
+    
+instance FromJSON ByteString  where
+    parseJSON = withText "ByteString" $ \u -> pure $ TE.encodeUtf8 u 
 
 class ToParamList a where
     toParamList :: a -> [(ByteString, ByteString)]
@@ -121,7 +130,7 @@ instance ToParamList CallHandler where
     toParamList (UrlHandler url) = [("Url", url)]
     toParamList (ApplicationHandler appSid) = [("ApplicationSid", appSid)]
 
-twilioReq :: (ToString a, Failure HttpException m) => User -> Method -> a -> m (Request m1)
+twilioReq :: (ToString a, MonadThrow m) => User -> Method -> a -> m (Request )
 twilioReq user method path = do
     initReq <- parseUrl $ urlBase <> toString (sid user) <> toString path
     let req = initReq { method = (fromString $ show method), secure = True, responseTimeout = Just 10000000 }

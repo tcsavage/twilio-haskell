@@ -1,8 +1,3 @@
-twilio-haskell
-==============
-
-Send SMS easily: 
-```haskell
 {-# LANGUAGE OverloadedStrings #-}
 import Control.Monad.Trans.Maybe
 import Twilio
@@ -18,4 +13,4 @@ main =
         do
           status <- runMaybeT $ send $ SMS from to message
           putStrLn $ show status
-```
+
